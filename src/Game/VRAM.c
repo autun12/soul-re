@@ -6,11 +6,13 @@ int VRAM_InsertFreeVram(short x, short y, short w, short h, short flags);
 int VRAM_DeleteFreeVram(short x, short y, short w, short h);
 void VRAM_DeleteFreeBlock(BlockVramEntry *block);
 
-EXTERN BlockVramEntry *usedVramBlocks;
+BlockVramEntry *usedVramBlocks;
 
-EXTERN BlockVramEntry *openVramBlocks;
+BlockVramEntry *openVramBlocks;
 
-EXTERN BlockVramEntry vramBlockList[90];
+BlockVramEntry vramBlockList[90];
+
+long numOfBlocksUsed;
 
 void VRAM_PrintVramBlock()
 {
@@ -35,7 +37,24 @@ void VRAM_PrintInfo()
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/VRAM", VRAM_InitVramBlockCache);
+void VRAM_InitVramBlockCache()
+{
+    int i;
+
+    openVramBlocks = NULL;
+    usedVramBlocks = NULL;
+
+    numOfBlocksUsed = 0;
+
+    for (i = 89; i >= 0; i--)
+    {
+        vramBlockList[i].flags = 0;
+    }
+
+    VRAM_InsertFreeVram(512, 240 + 16, 512, 240 + 16, 1);
+
+    VRAM_InitMorphPalettes();
+}
 
 void VRAM_EnableTerrainArea()
 {
@@ -162,7 +181,45 @@ int VRAM_InsertFreeBlock(BlockVramEntry *block)
     return 1;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/VRAM", VRAM_DeleteFreeBlock);
+void VRAM_DeleteFreeBlock(BlockVramEntry *block)
+{
+    BlockVramEntry *next;
+    BlockVramEntry *prev;
+
+    next = openVramBlocks;
+    prev = NULL;
+
+    if (block != NULL)
+    {
+        while (block != next)
+        {
+            if (next != NULL)
+            {
+                prev = next;
+                next = prev->next;
+
+                if (block != next)
+                {
+                    continue;
+                }
+            }
+
+            if (block != next)
+            {
+                return;
+            }
+        }
+
+        if (prev == NULL)
+        {
+            openVramBlocks = block->next;
+        }
+        else
+        {
+            prev->next = block->next;
+        }
+    }
+}
 
 void VRAM_InsertUsedBlock(BlockVramEntry *block)
 {
@@ -181,11 +238,57 @@ void VRAM_InsertUsedBlock(BlockVramEntry *block)
     }
 }
 
-void VRAM_DeleteUsedBlock(BlockVramEntry *block);
-INCLUDE_ASM("asm/nonmatchings/Game/VRAM", VRAM_DeleteUsedBlock);
+void VRAM_DeleteUsedBlock(BlockVramEntry *block)
+{
+    BlockVramEntry *next;
+    BlockVramEntry *prev;
 
-BlockVramEntry *VRAM_GetOpenBlock();
-INCLUDE_ASM("asm/nonmatchings/Game/VRAM", VRAM_GetOpenBlock);
+    next = usedVramBlocks;
+    prev = NULL;
+
+    while (block != next)
+    {
+        if (next != NULL)
+        {
+            prev = next;
+            next = prev->next;
+
+            if (block != next)
+            {
+                continue;
+            }
+        }
+
+        if (block != next)
+        {
+            return;
+        }
+    }
+
+    if (prev == NULL)
+    {
+        usedVramBlocks = block->next;
+    }
+    else
+    {
+        prev->next = block->next;
+    }
+}
+
+BlockVramEntry *VRAM_GetOpenBlock()
+{
+    int i;
+
+    for (i = 0; i < 90; i++)
+    {
+        if (vramBlockList[i].flags == 0)
+        {
+            return &vramBlockList[i];
+        }
+    }
+
+    return NULL;
+}
 
 int VRAM_DeleteFreeVram(short x, short y, short w, short h)
 {

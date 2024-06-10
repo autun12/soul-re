@@ -2,6 +2,9 @@
 #include "Game/GLYPH.h"
 #include "Game/CAMERA.h"
 #include "Game/GAMELOOP.h"
+#include "Game/STATE.h"
+#include "Game/DEBUG.h"
+#include "Game/SOUND.h"
 
 EXTERN STATIC short HUD_Captured;
 
@@ -71,21 +74,103 @@ unsigned long GlyphQuery(Instance *instance, unsigned long query)
     return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", GlyphPost);
+void GlyphPost(Instance *instance, unsigned long message, unsigned long messageData)
+{
+    GlyphData *data;
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphSwitchProcess);
+    data = (GlyphData *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", GlyphIsGlyphOpen);
+    if (message != 0x100007)
+    {
+        EnMessageQueueData(&data->messages, message, messageData);
+    }
+}
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphIsGlyphSet);
+void _GlyphSwitchProcess(Instance *instance, void (*process)())
+{
+    GlyphData *data;
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphIsGlyphUsable);
+    data = (GlyphData *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphIsAnyGlyphSet);
+    PurgeMessageQueue(&data->messages);
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphCost);
+    EnMessageQueueData(&data->messages, 0x100004, 0);
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphDefaultProcess);
+    data->process(instance, 0, 0);
+
+    EnMessageQueueData(&data->messages, 0x100001, 0);
+
+    data->process = process;
+
+    data->process(instance, 0, 0);
+}
+
+int GlyphIsGlyphOpen(Instance *instance)
+{
+    GlyphData *data;
+
+    data = (GlyphData *)instance->extraData;
+
+    return data->glyph_open;
+}
+
+int _GlyphIsGlyphSet(int glyph)
+{
+    unsigned long abilities;
+
+    abilities = INSTANCE_Query(gameTrackerX.playerInstance, 36) | debugRazielFlags3;
+
+    return (1 << (glyph + 17)) & abilities;
+}
+
+int _GlyphIsGlyphUsable(int glyph)
+{
+    return (1 << (glyph + 17)) & INSTANCE_Query(gameTrackerX.playerInstance, 19);
+}
+
+int _GlyphIsAnyGlyphSet()
+{
+    unsigned long abilities;
+
+    abilities = INSTANCE_Query(gameTrackerX.playerInstance, 36);
+
+    abilities |= debugRazielFlags3;
+
+    return abilities & 0x1FC0000;
+}
+
+int _GlyphCost(GlyphTuneData *glyphtunedata, int glyphNum)
+{
+    return (unsigned char)glyphtunedata->glyph_costs[glyphNum - 1];
+}
+
+void _GlyphDefaultProcess(Instance *instance, int data1, int data2)
+{
+    Message *Ptr;
+    GlyphData *data;
+
+    (void)data1;
+    (void)data2;
+
+    data = (GlyphData *)instance->extraData;
+
+    while ((Ptr = PeekMessageQueue(&data->messages)))
+    {
+        if (Ptr != NULL)
+        {
+            switch (Ptr->ID)
+            {
+            case 0x80000010:
+                _GlyphSwitchProcess(instance, &_GlyphSelectProcess);
+
+                SndPlayVolPan(17, 127, 64, 0);
+                break;
+            }
+
+            DeMessageQueue(&data->messages);
+        }
+    }
+}
 
 void HUD_GetPlayerScreenPt(DVECTOR *center)
 {
