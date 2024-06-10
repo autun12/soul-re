@@ -4,6 +4,8 @@
 #include "Game/G2/QUATG2.h"
 #include "Game/SPLINE.h"
 #include "Game/SCRIPT.h"
+#include "Game/G2/QUATG2.h"
+#include "Game/HASM.h"
 
 void SCRIPT_CombineEulerAngles(Rotation *combinedRotation, Rotation *inputRotation1, Rotation *inputRotation2)
 {
@@ -21,7 +23,112 @@ void SCRIPT_CombineEulerAngles(Rotation *combinedRotation, Rotation *inputRotati
     COPY_SVEC(Rotation, combinedRotation, G2EulerAngles, &ea);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_InstanceSplineInit);
+void SCRIPT_InstanceSplineInit(Instance *instance)
+{
+    Spline *spline;
+    RSpline *rspline;
+    Spline *sspline;
+    MultiSpline *multi;
+    SplineDef *sd;
+    SplineDef *rsd;
+    SplineDef *ssd;
+    unsigned long isParent;
+    unsigned long isClass;
+
+    multi = SCRIPT_GetMultiSpline(instance, &isParent, &isClass);
+
+    if (multi != NULL)
+    {
+        sd = SCRIPT_GetPosSplineDef(instance, multi, isParent, isClass);
+
+        rsd = SCRIPT_GetRotSplineDef(instance, multi, isParent, isClass);
+
+        ssd = SCRIPT_GetScaleSplineDef(instance, multi, isParent, isClass);
+
+        spline = multi->positional;
+
+        rspline = multi->rotational;
+
+        sspline = multi->scaling;
+
+        if (rspline != NULL)
+        {
+            G2Quat *q;
+            G2EulerAngles ea;
+
+            q = SplineGetFirstRot(rspline, rsd);
+
+            if ((isParent == 0) && (isClass == 0))
+            {
+                {
+                    G2Quat_ToMatrix_S(q, (G2Matrix *)&multi->curRotMatrix);
+
+                    q = (G2Quat *)&instance->rotation;
+
+                    if (instance->intro != NULL)
+                    {
+                        MATRIX introTransform;
+
+                        RotMatrix((SVECTOR *)&instance->intro->rotation, &introTransform);
+
+                        MulMatrix0(&multi->curRotMatrix, &introTransform, &multi->curRotMatrix);
+                    }
+
+                    instance->flags |= 0x1;
+                }
+            }
+            else
+            {
+                Rotation combinedRotation;
+
+                G2Quat_ToEuler(q, &ea, 0);
+
+                instance->rotation.x = ea.x;
+                instance->rotation.y = ea.y;
+                instance->rotation.z = ea.z;
+
+                SCRIPT_CombineEulerAngles((Rotation *)&combinedRotation, (Rotation *)&instance->rotation, &instance->intro->rotation);
+
+                COPY_SVEC(Rotation, &instance->rotation, Rotation, &combinedRotation);
+            }
+        }
+
+        if (spline != NULL)
+        {
+            SVector *start_point;
+
+            start_point = SplineGetFirstPoint(spline, sd);
+
+            if (start_point != NULL)
+            {
+                if (isClass != 0)
+                {
+                    ADD_SVEC(Position, &instance->position, Position, &instance->initialPos, SVector, start_point);
+                }
+                else
+                {
+                    instance->position.x = start_point->x;
+                    instance->position.y = start_point->y;
+                    instance->position.z = start_point->z;
+                }
+            }
+        }
+
+        if (sspline != NULL)
+        {
+            SVector *start_point;
+
+            start_point = SplineGetFirstPoint(sspline, ssd);
+
+            if (start_point != NULL)
+            {
+                instance->scale.x = start_point->x;
+                instance->scale.y = start_point->y;
+                instance->scale.z = start_point->z;
+            }
+        }
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPTCountFramesInSpline);
 
@@ -65,13 +172,101 @@ int SCRIPT_GetSplineFrameNumber(Instance *instance, SplineDef *splineDef)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_GetMultiSpline);
+MultiSpline *SCRIPT_GetMultiSpline(Instance *instance, unsigned long *isParent, unsigned long *isClass)
+{
+    MultiSpline *multi;
 
-INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_GetPosSplineDef);
+    multi = NULL;
 
-INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_GetRotSplineDef);
+    if (isParent != NULL)
+    {
+        *isParent = 0;
+    }
 
-INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_GetScaleSplineDef);
+    if (isClass != NULL)
+    {
+        *isClass = 0;
+    }
+
+    if ((instance != NULL) && (instance->intro != NULL) && (instance->intro->multiSpline != NULL))
+    {
+        multi = instance->intro->multiSpline;
+
+        if (((instance->flags & 0x100002) == 0x2) && (isParent != NULL))
+        {
+            *isParent = 1;
+        }
+    }
+
+    if ((multi == NULL) && (instance->object->modelList[0] != NULL))
+    {
+        multi = instance->object->modelList[0]->multiSpline;
+
+        if (isClass != NULL)
+        {
+            *isClass = 1;
+        }
+    }
+
+    return multi;
+}
+
+SplineDef *SCRIPT_GetPosSplineDef(Instance *instance, MultiSpline *multi, unsigned long isParent, unsigned long isClass)
+{
+    SplineDef *splineDef;
+
+    if ((isParent != 0) || (isClass != 0))
+    {
+        splineDef = (SplineDef *)&instance->work0;
+
+        return splineDef;
+    }
+
+    if (multi == NULL)
+    {
+        return NULL;
+    }
+
+    return &multi->curPositional;
+}
+
+SplineDef *SCRIPT_GetRotSplineDef(Instance *instance, MultiSpline *multi, unsigned long isParent, unsigned long isClass)
+{
+    SplineDef *splineDef;
+
+    if ((isParent != 0) || (isClass != 0))
+    {
+        splineDef = (SplineDef *)&instance->work2;
+
+        return splineDef;
+    }
+
+    if (multi == NULL)
+    {
+        return NULL;
+    }
+
+    return &multi->curRotational;
+}
+
+SplineDef *SCRIPT_GetScaleSplineDef(Instance *instance, MultiSpline *multi, unsigned long isParent, unsigned long isClass)
+{
+    SplineDef *splineDef;
+
+    if ((isParent != 0) || (isClass != 0))
+    {
+        splineDef = (SplineDef *)&instance->work4;
+
+        return splineDef;
+    }
+
+    if (multi == NULL)
+    {
+        return NULL;
+    }
+
+    return &multi->curScaling;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Game/SCRIPT", SCRIPT_RelativisticSpline);
 
